@@ -83,8 +83,10 @@ def scan_insert_retract(devices: Dict[str, Device], context: Optional[Production
     meca_insert: MecaRobot = devices["meca_insert"]
     context: ProductionContext = context
 
-    meca_lmi.api.StartProgram("22")
-    meca_lmi.api.WaitIdle()
+    if not context.get_variable("lmi_robot_in_position", 0):
+        meca_lmi.api.StartProgram("22")
+        meca_lmi.api.WaitIdle()
+        context.set_variable("lmi_robot_in_position", 1, force=True)
 
     meca_insert.api.StartProgram("32")
     scara.api.StartProgram("13")
@@ -138,13 +140,9 @@ def scan_insert_retract(devices: Dict[str, Device], context: Optional[Production
     meca_insert.api.StartProgram("31")
     scara.api.StartProgram("11")
     scara.api.StartProgram("14")
-    scara.api.StartProgram("11")
-    scara.api.WaitIdle()
-    meca_insert.api.WaitIdle()
-
-    meca_lmi.api.StartProgram("22")
-    meca_lmi.api.StartProgram("21")
+    # scara.api.StartProgram("11")
     
+    meca_lmi.api.StartProgram("22")
 
 def prod_cycle(devices: Dict[str, Device], context: Optional[ProductionContext] = None):
     """Logic for PROD task."""
@@ -157,6 +155,8 @@ def prod_cycle(devices: Dict[str, Device], context: Optional[ProductionContext] 
         pick_try_count = context.get_variable("pick_try_count", 0)
         context.set_variable("pick_try_count", pick_try_count + 1, force=True)
         asyril_pick(devices=devices, context=context)
+        if scara_part_in_hand(devices=devices, context=context):
+            break
         asyril.api.force_execute_vibration()
         time.sleep(asyril.api.get_remaining_duration_of_current_vibration()/1000)  # Allow time for vibration to settle before checking vacuum again.
         asyril.api.prepare_part()

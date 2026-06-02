@@ -9,6 +9,14 @@ if app_path not in sys.path:
 from devices import Device, MecaRobot
 from typing import Dict
 
+SCARA_VACUUM_THRESHOLD = 60
+
+def scara_part_in_hand(devices: Dict[str, Device]) -> bool:
+    """Return True when SCARA vacuum indicates a picked part."""
+    scara: MecaRobot = devices["scara"]
+    pressure = abs(scara.api.GetRtVacuumPressure())
+    return pressure > SCARA_VACUUM_THRESHOLD
+
 
 def home(devices: Dict[str, Device]):
     """Logic for HOME task."""
@@ -23,8 +31,9 @@ def home(devices: Dict[str, Device]):
     # Return SCARA to home via known-safe sequence.
     scara.api.StartProgram("11")
     scara.api.WaitIdle()
-    scara.api.StartProgram("14")
-    scara.api.StartProgram("11")
+    if scara_part_in_hand(devices=devices):
+        scara.api.StartProgram("14")
+        scara.api.StartProgram("11")
 
     # Return insert robot to standby.
     meca_insert.api.StartProgram("31")

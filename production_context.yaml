@@ -131,3 +131,15 @@ variables:
     reset_on: none
     description: Number of successful scan attempts since start.
 
+  lmi_robot_in_position:
+    type: bool
+    default: false
+    value: false
+    editable_when_idle: false
+
+    # Optional per-entry reset override.
+    # If present, this list is used instead of settings.default_reset_events.
+    # You can also set: reset_on: none
+    reset_on: prod_start
+    description: Indicates whether the LMI robot is in position for scan.
+
