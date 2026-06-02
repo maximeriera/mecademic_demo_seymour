@@ -47,6 +47,18 @@
 # production_context_file: "production_context.yaml"
 production_context_file: "production_context.yaml"
 
+manual_actions:
+  - key: "scan"
+    label: "Scan (inspection-only)"
+    description: "Perform a line scan with the LMI sensor and the Meca500-LMI robot. No insertion or pick-and-place actions will be performed."
+    confirm_title: "Confirm Line Scan"
+    confirm_message: "Run inspection-only routine now? Ensure workspace is safe before starting."
+  - key: "asyril_pick"
+    label: "Asyril Pick"
+    description: "Pick one part from the Asyril feeder and update SCARA pick variables. Ensure SCARA is in a safe state before running this action."
+    confirm_title: "Confirm Asyril Pick"
+    confirm_message: "Run Asyril pick routine now? Ensure SCARA is in a safe state before starting."
+
 devices:
 
   # --- Robots ---

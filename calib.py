@@ -16,7 +16,7 @@ CALIBRATION_RECIPE_ID = 13186
 def calib(devices: Dict[str, Device]):
     """Logic for CALIB task."""
     calib_poses_x = [67, 67, 25, 25]
-    calib_poses_y = [-120, -150, -120, -150]
+    calib_poses_y = [-120, -160, -120, -160]
     
     scara: MecaRobot = devices["scara"]
     asyril: AsyrilEyePlus = devices["asyril"]
@@ -30,6 +30,8 @@ def calib(devices: Dict[str, Device]):
     # Make sure SCARA is in a stable state before calibration sequence starts.
     scara.api.WaitIdle()
 
+    scara.api.StartProgram("stand_pick")
+
     for i, (x_pos, y_pos) in enumerate(zip(calib_poses_x, calib_poses_y)):
         scara.api.SetVariable("CalibPoses.x", x_pos)
         scara.api.SetVariable("CalibPoses.y", y_pos)
@@ -37,9 +39,11 @@ def calib(devices: Dict[str, Device]):
         scara.api.StartProgram("calib_place")
         scara.api.WaitIdle()
         asyril.api.take_calibration_image()
-        if i < 3:
-            scara.api.StartProgram("calib_pick")
-            scara.api.WaitIdle()
+        
+        scara.api.StartProgram("calib_pick")
+        scara.api.WaitIdle()
+
+    scara.api.StartProgram("stand_place")
 
     asyril.api.calibrate()
 

@@ -80,17 +80,54 @@ variables:
     # Optional per-entry reset override.
     # If present, this list is used instead of settings.default_reset_events.
     # You can also set: reset_on: none
-    reset_on: prod_start
-    description: Parts processed since production start.
+    reset_on: none
+    description: Parts processed since start.
 
-  change_id:
+  pick_try_count:
     type: int
-    default: 1
-    value: 1
+    default: 0
+    value: 0
     editable_when_idle: false
 
     # Optional per-entry reset override.
     # If present, this list is used instead of settings.default_reset_events.
     # You can also set: reset_on: none
-    reset_on: initialize
-    description: Tray identifier for current production cycle.
+    reset_on: none
+    description: Number of pick attempts since start.
+
+  pick_success_count:
+    type: int
+    default: 0
+    value: 0
+    editable_when_idle: false
+
+    # Optional per-entry reset override.
+    # If present, this list is used instead of settings.default_reset_events.
+    # You can also set: reset_on: none
+    reset_on: none
+    description: Number of successful pick attempts since start.
+
+  scan_try_count:
+    type: int
+    default: 0
+    value: 0
+    editable_when_idle: false
+
+    # Optional per-entry reset override.
+    # If present, this list is used instead of settings.default_reset_events.
+    # You can also set: reset_on: none
+    reset_on: none
+    description: Number of scan attempts since start.
+
+  scan_success_count:
+    type: int
+    default: 0
+    value: 0
+    editable_when_idle: false
+
+    # Optional per-entry reset override.
+    # If present, this list is used instead of settings.default_reset_events.
+    # You can also set: reset_on: none
+    reset_on: none
+    description: Number of successful scan attempts since start.
+
