@@ -1,3 +1,4 @@
+from multiprocessing import context
 import sys
 import os
 import time
@@ -10,6 +11,8 @@ if app_path not in sys.path:
 from devices import Device
 from typing import Dict, Optional
 
+from concurrent.futures import ThreadPoolExecutor
+
 try:
     from .manual_actions import *
 except ImportError:
@@ -18,16 +21,16 @@ except ImportError:
 from core.ProductionContext import ProductionContext
 from devices import LMISensor, MecaRobot, AsyrilEyePlus
 
-SCAN_RETRY_NUMBER = 3
+SCAN_RETRY_NUMBER = 2
 
 SCARA_VACUUM_THRESHOLD = 60
 
 def scara_part_in_hand(devices: Dict[str, Device], context: Optional[ProductionContext] = None) -> bool:
     """Return True when SCARA vacuum indicates a picked part."""
-    _ = context  # Kept for task API consistency.
+    context = context  # Kept for task API consistency.
     scara: MecaRobot = devices["scara"]
     pressure = abs(scara.api.GetRtVacuumPressure())
-    return pressure > SCARA_VACUUM_THRESHOLD
+    return pressure > context.get_param("vacuum_threshold", SCARA_VACUUM_THRESHOLD)
 
 '''
 def asyril_pick(devices: Dict[str, Device], context: Optional[ProductionContext] = None) -> None:
@@ -83,10 +86,8 @@ def scan_insert_retract(devices: Dict[str, Device], context: Optional[Production
     meca_insert: MecaRobot = devices["meca_insert"]
     context: ProductionContext = context
 
-    if not context.get_variable("lmi_robot_in_position", 0):
-        meca_lmi.api.StartProgram("22")
-        meca_lmi.api.WaitIdle()
-        context.set_variable("lmi_robot_in_position", 1, force=True)
+    meca_lmi.api.WaitIdle()
+    meca_insert.api.WaitIdle()
 
     meca_insert.api.StartProgram("32")
     scara.api.StartProgram("13")
@@ -119,8 +120,12 @@ def scan_insert_retract(devices: Dict[str, Device], context: Optional[Production
         context.set_variable("scan_success_count", scan_success_count + 1, force=True)
 
         meca_insert.logger.info(f"Setting insert position based on LMI measurements: x={x}, z={z}")
-        meca_insert.api.SetVariable("x_offset", -float(x)/1000)  # Convert from microns to mm 
-        meca_insert.api.SetVariable("z_offset", -float(z)/1000)  # Convert from microns to mm 
+
+        y_offset = context.get_param("insert_y_offset_mm", 0)
+        z_offset = context.get_param("insert_z_offset_mm", 0)
+
+        meca_insert.api.SetVariable("x_offset", -(float(x)/1000) + y_offset)  # Convert from microns to mm 
+        meca_insert.api.SetVariable("z_offset", -(float(z)/1000) + z_offset)  # Convert from microns to mm 
         meca_insert.api.StartProgram("insertion")
         meca_insert.api.WaitIdle()
 
@@ -137,29 +142,68 @@ def scan_insert_retract(devices: Dict[str, Device], context: Optional[Production
     # Retract sequence and return both robots to ready state.
     meca_insert.api.StartProgram("retract_from_inspect")
     meca_insert.api.WaitIdle()
-    meca_insert.api.StartProgram("31")
+    # meca_insert.api.StartProgram("31")
     scara.api.StartProgram("11")
     scara.api.StartProgram("14")
     # scara.api.StartProgram("11")
     
-    meca_lmi.api.StartProgram("22")
+    # meca_lmi.api.StartProgram("22")
 
-def prod_cycle(devices: Dict[str, Device], context: Optional[ProductionContext] = None):
-    """Logic for PROD task."""
-    context = context 
+def pick(devices: Dict[str, Device], context: Optional[ProductionContext] = None):
+    """Run pick sequence until Asyril part is successfully in SCARA's hand."""
+    _ = context  # Kept for task API consistency.
+    
     scara: MecaRobot = devices["scara"]
     asyril: AsyrilEyePlus = devices["asyril"]
-    meca_lmi: MecaRobot = devices["meca_lmi"]
 
-    while not scara_part_in_hand(devices=devices, context=context):
+    MAX_PICK_ATTEMPTS = 5
+
+    i = 0
+
+    while not scara_part_in_hand(devices=devices, context=context) and i < MAX_PICK_ATTEMPTS:
         pick_try_count = context.get_variable("pick_try_count", 0)
         context.set_variable("pick_try_count", pick_try_count + 1, force=True)
         asyril_pick(devices=devices, context=context)
         if scara_part_in_hand(devices=devices, context=context):
-            break
+            return True
         asyril.api.force_execute_vibration()
         time.sleep(asyril.api.get_remaining_duration_of_current_vibration()/1000)  # Allow time for vibration to settle before checking vacuum again.
         asyril.api.prepare_part()
+        i += 1
+
+    return False
+
+def prod_cycle(devices: Dict[str, Device], context: Optional[ProductionContext] = None):
+    """Logic for PROD task."""
+    context = context 
+    meca_insert: MecaRobot = devices["meca_insert"]
+    scara: MecaRobot = devices["scara"]
+    asyril: AsyrilEyePlus = devices["asyril"]
+    meca_lmi: MecaRobot = devices["meca_lmi"]
+
+    executor = ThreadPoolExecutor(max_workers=2)
+
+    future_pick = executor.submit(pick, devices=devices, context=context)
+
+    if not context.get_variable("lmi_robot_in_position", 0):
+        meca_lmi.api.StartProgram("22")
+        meca_lmi.api.WaitIdle()
+        context.set_variable("lmi_robot_in_position", 1, force=True)
+
+
+    meca_insert.api.StartProgram("32")
+    meca_insert.api.SetJointVel(50)
+    meca_insert.api.MoveJointsRel(0, 0, 0, 0, 0, 180)
+    meca_insert.api.WaitIdle()
+    
+    scan(devices=devices, context=context)
+
+    meca_insert.api.MoveJointsRel(0, 0, 0, 0, 0, -180)
+    meca_insert.api.StartProgram("retract_from_inspect")
+    # meca_insert.api.StartProgram("32")
+
+    if not future_pick.result():
+        return  # Wait for the pick operation to complete
 
     pick_success_count = context.get_variable("pick_success_count", 0)
     context.set_variable("pick_success_count", pick_success_count + 1, force=True)
@@ -168,6 +212,7 @@ def prod_cycle(devices: Dict[str, Device], context: Optional[ProductionContext] 
 
     scara.api.WaitIdle()
     meca_lmi.api.WaitIdle()
+    meca_insert.api.WaitIdle()
 
     return
 

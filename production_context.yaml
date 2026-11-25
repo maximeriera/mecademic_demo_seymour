@@ -43,21 +43,59 @@ params:
   #   persist_scope: memory | disk  # optional override of settings.storage_scope
   #   description: <free text>
 
-  cycle_wait_s:
+  vacuum_threshold:
     # Allowed types: int | float | bool | str
     type: float
 
     # Value used when reset is triggered.
-    default: 1.0
+    default: 60.0
 
     # Current runtime value used by production logic.
-    value: 1.0
+    value: 60.0
+
+    reset_on: none
 
     # If false, value update is rejected from UI/API even when not BUSY.
     editable_when_idle: true
 
     # Human-readable purpose.
-    description: Delay applied in demo prod cycle.
+    description: Vacuum threshold for pick success.
+
+  insert_y_offset_mm:
+    # Allowed types: int | float | bool | str
+    type: float
+
+    # Value used when reset is triggered.
+    default: 0.0
+
+    # Current runtime value used by production logic.
+    value: 0.2
+
+    reset_on: none
+
+    # If false, value update is rejected from UI/API even when not BUSY.
+    editable_when_idle: true
+
+    # Human-readable purpose.
+    description: Y-axis offset for insert position.
+
+  insert_z_offset_mm:
+    # Allowed types: int | float | bool | str
+    type: float
+
+    # Value used when reset is triggered.
+    default: 0.0
+
+    # Current runtime value used by production logic.
+    value: 0.0
+
+    reset_on: none
+
+    # If false, value update is rejected from UI/API even when not BUSY.
+    editable_when_idle: true
+
+    # Human-readable purpose.
+    description: Y-axis offset for insert position.
 
 variables:
   # VARIABLE ENTRY FORMAT

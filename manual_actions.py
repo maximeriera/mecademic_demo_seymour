@@ -41,14 +41,14 @@ def asyril_pick(devices: Dict[str, Device], context: Optional[ProductionContext]
     asyril: AsyrilEyePlus = devices["asyril"]
 
     asyril.logger.info("force taking image for pick")
-    # asyril.api.force_take_image()
+    asyril.api.force_take_image()
     
     asyril.logger.info("getting part pose for pick")
     pose = asyril.api.get_part()
 
     # Reject near-vertical part orientations that are known to fail downstream.
-    while abs(pose['rz'] - 90) < 10:
-        pose = asyril.api.get_part()
+    # while abs(pose['rz'] - 90) < 10:
+    #     pose = asyril.api.get_part()
 
     asyril.logger.info(f"pose response: {pose}")
     if pose['resp'] == 200:
