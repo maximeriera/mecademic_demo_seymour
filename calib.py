@@ -1,74 +1,59 @@
-import sys
-import os
+"""CALIBRATION task — Asyril hand-eye calibration with the SCARA.
 
-# Ensure mecademic_demo_app is in the Python path for standalone execution
-app_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'mecademic_demo_app'))
-if app_path not in sys.path:
-    sys.path.insert(0, app_path)
+Runs from the CALIBRATION button only. The SCARA takes the calibration target
+from its stand, places it at four poses where the Asyril takes an image of
+it, returns it, then the Asyril computes the calibration and goes back into
+production. An exception here faults the cell; if it happens after the
+feeder left production, INITIALIZE puts it back (it restarts production with
+the recipe from config.yaml).
+"""
 
-from devices import Device
 from typing import Dict
 
-from devices import MecaRobot, AsyrilEyePlus
+from core import AppContext
+from devices import AsyrilEyePlus, Device, MecaRobot
 
+import robot_programs as rp
+from cell_tools import or_simulated
+from prod import timeout_s
+
+#: Asyril recipe used for the hand-eye calibration.
 CALIBRATION_RECIPE_ID = 13186
+#: Where the SCARA places the target for each calibration image (robot variables
+#: CalibPoses.x / CalibPoses.y, mm, SCARA frame). Also sent to the Asyril.
+CALIB_POSES_XY_MM = [(67, -120), (67, -160), (25, -120), (25, -160)]
 
-def calib(devices: Dict[str, Device]):
-    """Logic for CALIB task."""
-    calib_poses_x = [67, 67, 25, 25]
-    calib_poses_y = [-120, -160, -120, -160]
-    
+
+def calib(devices: Dict[str, Device], context: AppContext):
     scara: MecaRobot = devices["scara"]
     asyril: AsyrilEyePlus = devices["asyril"]
+    timeout = timeout_s(context)
 
-    asyril.api.stop_production()
-    asyril.api.start_calibration(CALIBRATION_RECIPE_ID)
+    with context.step("Start feeder calibration"):
+        asyril.api.stop_production()
+        reply = or_simulated(asyril.api.start_calibration(CALIBRATION_RECIPE_ID), "200")
+        if not str(reply).startswith("200"):
+            raise RuntimeError(f"The Asyril refused to start calibration (recipe "
+                               f"{CALIBRATION_RECIPE_ID}): {reply}")
 
-    if not asyril.api._in_calib:
-        raise RuntimeError("Failed to start calibration")
+    with context.step("Take calibration target"):
+        scara.api.WaitIdle(timeout=timeout)
+        rp.run(scara, rp.SCARA_CALIB_STAND_PICK, timeout=timeout)
 
-    # Make sure SCARA is in a stable state before calibration sequence starts.
-    scara.api.WaitIdle()
+    with context.step("Capture calibration images"):
+        for x_mm, y_mm in CALIB_POSES_XY_MM:
+            scara.api.SetVariable("CalibPoses.x", x_mm)
+            scara.api.SetVariable("CalibPoses.y", y_mm)
+            asyril.api.set_calibration_pose(x_mm, y_mm)
+            rp.run(scara, rp.SCARA_CALIB_PLACE, timeout=timeout)
+            asyril.api.take_calibration_image()
+            rp.run(scara, rp.SCARA_CALIB_PICK, timeout=timeout)
 
-    scara.api.StartProgram("stand_pick")
+    with context.step("Return calibration target"):
+        rp.run(scara, rp.SCARA_CALIB_STAND_PLACE, timeout=timeout)
 
-    for i, (x_pos, y_pos) in enumerate(zip(calib_poses_x, calib_poses_y)):
-        scara.api.SetVariable("CalibPoses.x", x_pos)
-        scara.api.SetVariable("CalibPoses.y", y_pos)
-        asyril.api.set_calibration_pose(x_pos, y_pos)
-        scara.api.StartProgram("calib_place")
-        scara.api.WaitIdle()
-        asyril.api.take_calibration_image()
-        
-        scara.api.StartProgram("calib_pick")
-        scara.api.WaitIdle()
+    with context.step("Compute calibration"):
+        asyril.api.calibrate()          # raises RuntimeError when the Eye+ rejects it
 
-    scara.api.StartProgram("stand_place")
-
-    asyril.api.calibrate()
-
-    asyril.api.start_production()
-    return
-
-if __name__ == '__main__':
-    import logging
-    from core.ApplicationController import ApplicationController
-
-    logging.basicConfig(level=logging.INFO)
-    print("Running standalone test for calib...")
-
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    config_path = os.path.join(script_dir, "config.yaml")
-
-    # Load actual device configurations
-    app_ctrl = ApplicationController(config_path=config_path)
-
-    try:
-        # Optional: uncomment to actually communicate with hardware
-        app_ctrl.initialize()
-
-        calib(app_ctrl.devices)
-    finally:
-        app_ctrl.shutdown()
-
-    print("Test completed successfully.")
+    with context.step("Restart feeder production"):
+        asyril.api.start_production()

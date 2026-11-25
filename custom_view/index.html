@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Seymour | Operator</title>
+    <!-- Brand font, colour tokens, buttons and status box from the standard app. -->
+    <link rel="stylesheet" href="/static/css/app.css">
+    <style>
+        body { justify-content: flex-start; padding: 0 16px 24px; }
+        .screen { width: min(100%, 1200px); display: flex; flex-direction: column; gap: 14px; padding-top: 10px; }
+        .screen .view-topbar { width: 100%; margin-bottom: 0; }
+
+        .panel {
+            background: var(--color-panel);
+            border: 1px solid var(--color-border);
+            border-radius: var(--radius);
+            padding: 14px 16px;
+        }
+        .panel h2 {
+            margin: 0 0 10px;
+            font-size: 0.75em;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--color-muted);
+        }
+        .buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+        .buttons button { flex: 1 1 130px; min-height: 44px; }
+        button:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+
+        .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+        .tile { background: var(--color-panel-2); border-radius: var(--radius-control); padding: 10px 12px; }
+        .tile .label { font-size: 0.75em; color: var(--color-muted); }
+        .tile .value { font-size: 1.9em; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
+        .tile .sub { font-size: 0.75em; color: var(--color-muted); font-variant-numeric: tabular-nums; }
+
+        .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+        @media (max-width: 760px) { .two-col { grid-template-columns: 1fr; } }
+
+        table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; font-size: 0.9em; }
+        th, td { text-align: right; padding: 4px 6px; border-bottom: 1px solid var(--color-border); }
+        th:first-child, td:first-child { text-align: left; }
+        th { color: var(--color-muted); font-weight: 600; font-size: 0.85em; }
+        .ok { color: var(--color-accent); }
+        .bad { color: var(--color-red); }
+        .muted { color: var(--color-muted); }
+
+        .manual button { flex: 1 1 200px; text-align: left; padding: 10px 12px; }
+        .manual button small { display: block; font-weight: 400; color: var(--color-muted); margin-top: 3px; white-space: normal; }
+
+        #message { min-height: 1.3em; font-size: 0.9em; }
+    </style>
+</head>
+<body>
+<div class="screen">
+    <!-- Logo, system status and current step, from view-header.js. -->
+    <div id="view-topbar"></div>
+
+    <section class="panel">
+        <h2>Cell</h2>
+        <div class="buttons">
+            <button class="btn-init"  data-post="/api/initialize" data-when="Off Ready Faulted">Initialize</button>
+            <button class="btn-task"  data-post="/api/task/home" data-when="Ready">Home</button>
+            <button class="btn-start" data-post="/api/task/prod" data-when="Ready">Start production</button>
+            <button class="btn-stop"  data-post="/api/stop" data-when="Busy">Stop (end of cycle)</button>
+            <button class="btn-abort" data-post="/api/abort" data-when="Busy">Abort</button>
+            <button class="btn-clear" data-post="/api/clear_faults" data-when="Faulted">Clear faults</button>
+        </div>
+        <div id="message" class="muted"></div>
+    </section>
+
+    <section class="panel">
+        <h2>Production (since start)</h2>
+        <div class="tiles">
+            <div class="tile"><div class="label">Parts inserted</div><div class="value" id="parts">–</div><div class="sub" id="cycles">–</div></div>
+            <div class="tile"><div class="label">Cycle time</div><div class="value" id="cycle-time">–</div><div class="sub" id="cycle-avg">–</div></div>
+            <div class="tile"><div class="label">Pick success</div><div class="value" id="pick-rate">–</div><div class="sub" id="pick-sub">–</div></div>
+            <div class="tile"><div class="label">Scan success</div><div class="value" id="scan-rate">–</div><div class="sub" id="scan-sub">–</div></div>
+        </div>
+    </section>
+
+    <div class="two-col">
+        <section class="panel">
+            <h2>Last scans</h2>
+            <table>
+                <thead><tr><th>Time</th><th>X (mm)</th><th>Z (mm)</th><th>Result</th></tr></thead>
+                <tbody id="scans"><tr><td colspan="4" class="muted">No scan yet.</td></tr></tbody>
+            </table>
+        </section>
+
+        <section class="panel">
+            <h2>Manual actions</h2>
+            <div class="buttons manual" id="manual"><span class="muted">Loading…</span></div>
+        </section>
+    </div>
+</div>
+
+<script src="/static/js/view-header.js"></script>
+<script>
+(function () {
+    'use strict';
+    const $ = (id) => document.getElementById(id);
+    const MAX_SCANS = 12;
+    let state = 'Off';
+    let scanCursor = null;
+    const scans = [];
+
+    function say(text, bad) {
+        $('message').textContent = text || '';
+        $('message').className = bad ? 'bad' : 'muted';
+    }
+
+    async function post(url, confirmText) {
+        if (confirmText && !window.confirm(confirmText)) return;
+        say('Sending…');
+        try {
+            const r = await fetch(url, { method: 'POST' });
+            const body = await r.json().catch(() => ({}));
+            say(body.message || (r.ok ? 'Done.' : `Refused (${r.status}).`), !r.ok || body.success === false);
+        } catch (e) {
+            say('Controller unreachable.', true);
+        }
+        refresh();
+    }
+
+    // Buttons are enabled only in the states where the controller accepts them.
+    function applyState() {
+        document.querySelectorAll('[data-when]').forEach((b) => {
+            b.disabled = !b.dataset.when.split(' ').includes(state);
+        });
+    }
+
+    document.querySelectorAll('[data-post]').forEach((b) => {
+        const confirmText = b.classList.contains('btn-start') ? 'Start production? The robots will move.' :
+                            b.dataset.post === '/api/task/home' ? 'Home the cell? The robots will move.' : null;
+        b.addEventListener('click', () => post(b.dataset.post, confirmText));
+    });
+
+    async function loadManualActions() {
+        const box = $('manual');
+        try {
+            const { actions = [] } = await (await fetch('/api/manual/actions')).json();
+            box.innerHTML = '';
+            if (!actions.length) { box.innerHTML = '<span class="muted">None configured.</span>'; return; }
+            actions.forEach((a) => {
+                const b = document.createElement('button');
+                b.className = 'btn-task';
+                b.dataset.when = 'Ready';
+                b.textContent = a.label || a.key;
+                if (a.description) {
+                    const s = document.createElement('small');
+                    s.textContent = a.description;
+                    b.appendChild(s);
+                }
+                const confirmText = [a.confirm_title, a.confirm_message].filter(Boolean).join('\n\n');
+                b.addEventListener('click', () =>
+                    post(`/api/manual/actions/${encodeURIComponent(a.key)}/run`, confirmText || `Run ${a.label}?`));
+                box.appendChild(b);
+            });
+            applyState();
+        } catch (e) {
+            box.innerHTML = '<span class="bad">Could not load the manual actions.</span>';
+        }
+    }
+
+    const fmtS = (s) => (s === null || s === undefined) ? '–' : `${s.toFixed(1)} s`;
+    const rate = (ok, tries) => tries > 0 ? `${Math.round(100 * ok / tries)} %` : '–';
+    const fmtMm = (v) => (v === null || v === undefined) ? '–' : v.toFixed(3);
+
+    function renderScans() {
+        const body = $('scans');
+        if (!scans.length) return;
+        body.innerHTML = '';
+        scans.slice().reverse().forEach(({ time, value }) => {
+            const tr = document.createElement('tr');
+            [time, fmtMm(value.x_mm), fmtMm(value.z_mm)].forEach((text) => {
+                const td = document.createElement('td'); td.textContent = text; tr.appendChild(td);
+            });
+            const td = document.createElement('td');
+            td.textContent = value.ok ? 'valid' : 'INVALID';
+            td.className = value.ok ? 'ok' : 'bad';
+            tr.appendChild(td);
+            body.appendChild(tr);
+        });
+    }
+
+    async function refresh() {
+        try {
+            const [status, prod, ctx] = await Promise.all([
+                fetch('/api/status').then((r) => r.json()),
+                fetch('/api/prod/metrics').then((r) => r.json()),
+                fetch('/api/context').then((r) => r.json()),
+            ]);
+            state = status.status;
+            applyState();
+
+            const v = (name) => ((ctx.variables || {})[name] || {}).value;
+            const m = prod.metrics || {};
+            $('parts').textContent = v('part_count') ?? '–';
+            $('cycles').textContent = `${m.completed_cycles ?? 0} cycles · ${v('scan_fail_count') ?? 0} not inserted`;
+            $('cycle-time').textContent = fmtS(m.last_cycle_duration_s);
+            $('cycle-avg').textContent = `average ${fmtS(m.average_cycle_duration_s)}`;
+            $('pick-rate').textContent = rate(v('pick_success_count'), v('pick_try_count'));
+            $('pick-sub').textContent = `${v('pick_success_count') ?? 0} / ${v('pick_try_count') ?? 0} attempts`;
+            $('scan-rate').textContent = rate(v('scan_success_count'), v('scan_try_count'));
+            $('scan-sub').textContent = `${v('scan_success_count') ?? 0} / ${v('scan_try_count') ?? 0} scans`;
+
+            // Scans published by prod.scan_once(), newest last; the cursor returns only new ones.
+            const q = scanCursor === null ? '' : `&after=${scanCursor}`;
+            const data = await fetch(`/api/data/read?ch=scan${q}`).then((r) => r.json());
+            // The app restarted (new hub, counter back near 0): read from the start next time.
+            scanCursor = (scanCursor !== null && data.cursor !== null && data.cursor < scanCursor) ? null : data.cursor;
+            const now = Date.now() / 1000;
+            (data.data.scan || []).forEach(([t, value]) => {
+                const when = new Date((now - (data.now - t)) * 1000);
+                scans.push({ time: when.toLocaleTimeString(), value });
+            });
+            scans.splice(0, Math.max(0, scans.length - MAX_SCANS));
+            renderScans();
+        } catch (e) {
+            state = 'Off';
+            applyState();
+        }
+    }
+
+    loadManualActions();
+    refresh();
+    setInterval(refresh, 1000);
+})();
+</script>
+</body>
+</html>

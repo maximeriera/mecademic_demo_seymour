@@ -211,3 +211,6 @@ __marimo__/
 
 # Older version
 accessories_api/
+
+# Written by the Mecademic demo app at runtime (persisted params/variables)
+context.state.json

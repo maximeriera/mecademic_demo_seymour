@@ -1,0 +1,133 @@
+# context.yaml — params and variables of the Seymour demo cell
+#
+# Read by task code through `context`, shown and edited in the Variables tab
+# while no task runs. This file is only read, never rewritten, so comments
+# are safe. Entries with `persist: true` are saved to context.state.json next
+# to it (git-ignored); delete that file to start again from the defaults.
+#
+# Entry format (params and variables alike):
+#   <name>:
+#     type: int | float | bool | str
+#     default: <typed value>        # starting value, and what a reset restores
+#     editable_when_idle: true      # false = read-only in the UI (code can still write it)
+#     reset_on: [event, ...]        # initialize, prod_start, prod_stop, abort, fault, or none
+#     persist: false                # true = keep the value across restarts
+#     description: <free text>      # shown in the Variables tab
+#
+# Task code that writes an entry not declared here raises ContextError, and
+# reading one returns the default passed in code, silently. Declare every
+# name the code uses.
+
+settings:
+  default_reset_events: none
+
+params:
+  program_timeout_s:
+    type: float
+    default: 120
+    editable_when_idle: true
+    description: Longest one robot program may take before the task faults, seconds.
+
+  scara_vacuum_threshold_kpa:
+    type: float
+    default: 60
+    editable_when_idle: true
+    description: SCARA vacuum (absolute value, kPa) above which it holds a part.
+
+  max_pick_attempts:
+    type: int
+    default: 10
+    editable_when_idle: true
+    description: Pick attempts (with a feeder shake between them) before the cycle faults.
+
+  feeder_retries:
+    type: int
+    default: 5
+    editable_when_idle: true
+    description: Part requests to the Asyril per pick attempt; near-vertical parts (rz ≈ 90°) are skipped.
+
+  scan_retries:
+    type: int
+    default: 3
+    editable_when_idle: true
+    description: LMI scans per cycle until x and z are valid. Without a valid scan the part is not inserted.
+
+  scan_settle_s:
+    type: float
+    default: 0.5
+    editable_when_idle: true
+    description: Pause after a scan pass before its result is read, seconds.
+
+  cycle_wait_s:
+    type: float
+    default: 0.0
+    editable_when_idle: true
+    description: Idle pause between cycles, seconds (shows as idle time on the Production tab).
+
+variables:
+  part_count:
+    type: int
+    default: 0
+    editable_when_idle: false
+    reset_on: prod_start
+    persist: true
+    description: Parts inserted since production start.
+
+  pick_try_count:
+    type: int
+    default: 0
+    editable_when_idle: false
+    reset_on: prod_start
+    persist: true
+    description: Pick attempts since production start.
+
+  pick_success_count:
+    type: int
+    default: 0
+    editable_when_idle: false
+    reset_on: prod_start
+    persist: true
+    description: Pick attempts that left a part on the vacuum, since production start.
+
+  scan_try_count:
+    type: int
+    default: 0
+    editable_when_idle: false
+    reset_on: prod_start
+    persist: true
+    description: LMI scans (before insertion) since production start.
+
+  scan_success_count:
+    type: int
+    default: 0
+    editable_when_idle: false
+    reset_on: prod_start
+    persist: true
+    description: Scans with valid x and z, since production start.
+
+  scan_fail_count:
+    type: int
+    default: 0
+    editable_when_idle: false
+    reset_on: prod_start
+    persist: true
+    description: Cycles without a valid scan (part not inserted), since production start.
+
+  last_scan_x_mm:
+    type: float
+    default: 0.0
+    editable_when_idle: false
+    description: X measured by the last valid scan, mm (the insertion uses its negative as x_offset).
+
+  last_scan_z_mm:
+    type: float
+    default: 0.0
+    editable_when_idle: false
+    description: Z measured by the last valid scan, mm (the insertion uses its negative as z_offset).
+
+  lmi_robot_in_position:
+    type: bool
+    default: false
+    editable_when_idle: false
+    reset_on: prod_start
+    description: meca_lmi already parked for the next scan (set by the first cycle).

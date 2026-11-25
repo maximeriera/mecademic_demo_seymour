@@ -1,43 +1,21 @@
-import sys
-import os
+"""SHIPMENT task — not defined for this cell yet.
 
-# Ensure mecademic_demo_app is in the Python path for standalone execution
-app_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'mecademic_demo_app'))
-if app_path not in sys.path:
-    sys.path.insert(0, app_path)
+Runs from the SHIPMENT button only. It does nothing but say so: the robots
+are folded for transport by hand (or with HOME). The file must exist anyway:
+without it the app would run the demo shipment() shipped in
+mecademic_demo_app/app_logic/, written for other devices.
 
-from devices import Device
+To add one: write the transport-pose programs on each controller, list them
+in robot_programs.py, run them here in steps, and declare the steps under
+``sequences: shipment`` in config.yaml.
+"""
+
 from typing import Dict
 
+from core import AppContext
+from devices import Device
 
-def shipment(devices: Dict[str, Device]):
-    """Placeholder SHIPMENT task.
 
-    The full shipment motion sequence is intentionally disabled in this repo.
-    Keep this task as a no-op hook for integration tests and future expansion.
-    """
-    _ = devices
-    return
-
-if __name__ == '__main__':
-    import logging
-    from core.ApplicationController import ApplicationController
-
-    logging.basicConfig(level=logging.INFO)
-    print("Running standalone test for shipment...")
-
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    config_path = os.path.join(script_dir, "config.yaml")
-
-    # Load actual device configurations
-    app_ctrl = ApplicationController(config_path=config_path)
-
-    try:
-        # Optional: uncomment to actually communicate with hardware
-        app_ctrl.initialize()
-
-        shipment(app_ctrl.devices)
-    finally:
-        app_ctrl.shutdown()
-
-    print("Test completed successfully.")
+def shipment(devices: Dict[str, Device], context: AppContext):
+    with context.step("No shipment sequence defined"):
+        devices["scara"].logger.info("SHIPMENT: no shipment sequence defined for this cell; nothing moved.")

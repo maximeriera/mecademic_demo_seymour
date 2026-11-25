@@ -1,67 +1,43 @@
-import sys
-import os
+"""HOME task — bring the Seymour demo cell to its start position.
 
-# Ensure mecademic_demo_app is in the Python path for standalone execution
-app_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'mecademic_demo_app'))
-if app_path not in sys.path:
-    sys.path.insert(0, app_path)
+Runs from the HOME button, and automatically before the first PROD cycle and
+after a graceful STOP. INITIALIZE already activated and homed every robot
+(MecaRobot.initialize), so this only runs the cell's own home programs, in an
+order that keeps the robots clear of each other. An exception here faults the
+cell.
+"""
 
-from devices import Device, MecaRobot
 from typing import Dict
 
-SCARA_VACUUM_THRESHOLD = 60
+from core import AppContext
+from devices import Device, MecaRobot
 
-def scara_part_in_hand(devices: Dict[str, Device]) -> bool:
-    """Return True when SCARA vacuum indicates a picked part."""
-    scara: MecaRobot = devices["scara"]
-    pressure = abs(scara.api.GetRtVacuumPressure())
-    return pressure > SCARA_VACUUM_THRESHOLD
+import robot_programs as rp
+from prod import scara_part_in_hand, timeout_s
 
 
-def home(devices: Dict[str, Device]):
-    """Logic for HOME task."""
+def home(devices: Dict[str, Device], context: AppContext):
+    """Park meca_lmi, home the SCARA (releasing a held part), then home the two Meca500."""
     scara: MecaRobot = devices["scara"]
     meca_lmi: MecaRobot = devices["meca_lmi"]
     meca_insert: MecaRobot = devices["meca_insert"]
+    timeout = timeout_s(context)
 
-    # Park LMI robot first to clear shared workspace.
-    meca_lmi.api.StartProgram("22")
-    meca_lmi.api.WaitIdle()
+    # meca_lmi first: it clears the shared station for the others.
+    with context.step("Park LMI robot"):
+        rp.run(meca_lmi, rp.LMI_PARK, timeout=timeout)
 
-    # Return SCARA to home via known-safe sequence.
-    scara.api.StartProgram("11")
-    scara.api.WaitIdle()
-    if scara_part_in_hand(devices=devices):
-        scara.api.StartProgram("14")
-        scara.api.StartProgram("11")
+    with context.step("Home SCARA"):
+        rp.run(scara, rp.SCARA_HOME, timeout=timeout)
+        scara_release = None
+        if scara_part_in_hand(devices, context):
+            # Released while the two Meca500 home; waited for at the end.
+            scara_release = rp.start(scara, rp.SCARA_RELEASE, rp.SCARA_HOME)
 
-    # Return insert robot to standby.
-    meca_insert.api.StartProgram("31")
-    meca_insert.api.WaitIdle()
+    with context.step("Home insertion robot"):
+        rp.run(meca_insert, rp.INSERT_STANDBY, timeout=timeout)
 
-    meca_lmi.api.StartProgram("21")
-    meca_lmi.api.WaitIdle()
-    scara.api.WaitIdle()
-    
-if __name__ == '__main__':
-    import logging
-    from core.ApplicationController import ApplicationController
-
-    logging.basicConfig(level=logging.INFO)
-    print("Running standalone test for home...")
-
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    config_path = os.path.join(script_dir, "config.yaml")
-
-    # Load actual device configurations
-    app_ctrl = ApplicationController(config_path=config_path)
-
-    try:
-        # Optional: uncomment to actually communicate with hardware
-        app_ctrl.initialize()
-
-        home(app_ctrl.devices)
-    finally:
-        app_ctrl.shutdown()
-
-    print("Test completed successfully.")
+    with context.step("Home LMI robot"):
+        rp.run(meca_lmi, rp.LMI_HOME, timeout=timeout)
+        if scara_release is not None:
+            scara_release.wait(timeout=timeout)

@@ -1,74 +1,65 @@
+"""Manual actions of the Seymour demo cell — the buttons of the Manual tab
+(and of the custom view).
+
+Each key returned by :func:`get_manual_actions` must also be listed under
+``manual_actions:`` in config.yaml (label, description, confirmation text),
+and every key listed there must be returned here, or the app refuses to
+start the workspace.
+
+A manual action runs as an exclusive task, like HOME, so the cell must be
+READY. It is the only kind of task allowed while a device is released. An
+exception here faults the cell.
+
+Every action calls the same functions as prod_cycle (prod.py), so testing a
+piece by hand tests the code PROD runs. Manual actions don't touch the PROD
+counters.
+"""
+
 from __future__ import annotations
 
-import os
-import sys
-import time
 from typing import Dict
 
-# Ensure mecademic_demo_app is in the Python path for standalone execution
-app_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'mecademic_demo_app'))
-if app_path not in sys.path:
-    sys.path.insert(0, app_path)
-
+from core import AppContext
 from devices import Device
-from typing import Dict, Optional
 
-from core.ProductionContext import ProductionContext
-
-from devices import Device
-from devices import LMISensor, MecaRobot, AsyrilEyePlus
+from prod import asyril_pick as _asyril_pick
+from prod import release_part as _release_part
+from prod import scan_once, shake_feeder as _shake_feeder
 
 
-def scan(devices: Dict[str, Device], context=None):
-    """Example manual runtime action.
+def scan(devices: Dict[str, Device], context: AppContext):
+    """One LMI scan pass with meca_lmi, result logged and shown in the custom view. Nothing else moves."""
+    with context.step("Scan part"):
+        measured = scan_once(devices, context)
+    devices["lmi_sensor"].logger.info(
+        f"Manual scan: {'x=%.3f mm, z=%.3f mm' % measured if measured else 'INVALID'}")
 
-    Implement project-specific inspection-only logic here.
-    """
-    lmi_sensor: LMISensor = devices["lmi_sensor"]
-    meca_lmi: MecaRobot = devices["meca_lmi"]
 
-    meca_lmi.api.ExpectExternalCheckpoint(222)
-    meca_lmi.api.StartProgram("24")
-    meca_lmi.api.WaitForAnyCheckpoint()
-    lmi_sensor.api.trigger()
-    meca_lmi.api.WaitIdle()
-    time.sleep(0.5)
+def asyril_pick(devices: Dict[str, Device], context: AppContext):
+    """Pick one part from the Asyril with the SCARA (sets PickPose.x/.y/.rz on the SCARA)."""
+    with context.step("Pick part from feeder"):
+        picked = _asyril_pick(devices, context)
+    if not picked:
+        raise RuntimeError("The Asyril found no pickable part: shake the feeder or add parts.")
 
-def asyril_pick(devices: Dict[str, Device], context: Optional[ProductionContext] = None) -> None:
-    """Pick one part from Asyril and update SCARA pick variables."""
-    _ = context  # Kept for task API consistency.
-    scara: MecaRobot = devices["scara"]
-    asyril: AsyrilEyePlus = devices["asyril"]
 
-    asyril.logger.info("force taking image for pick")
-    # asyril.api.force_take_image()
-    
-    asyril.logger.info("getting part pose for pick")
-    pose = asyril.api.get_part()
+def release_part(devices: Dict[str, Device], context: AppContext):
+    """SCARA releases whatever it holds, then goes home."""
+    with context.step("Release part"):
+        _release_part(devices, context)
 
-    # Reject near-vertical part orientations that are known to fail downstream.
-    while abs(pose['rz'] - 90) < 10:
-        pose = asyril.api.get_part()
 
-    asyril.logger.info(f"pose response: {pose}")
-    if pose['resp'] == 200:
-        scara.api.SetVariable(name='PickPose.x', value=pose['x'])
-        scara.api.SetVariable(name='PickPose.y', value=pose['y'])
-        scara.api.SetVariable(name='PickPose.rz', value=pose['rz'])
-    else:
-        asyril.logger.warning("Failed to get part pose (timeout)")
-        scara.logger.warning("Failed to get part pose (timeout) - skiping pick")
-        return
-    
-    scara.api.StartProgram("12")
-    scara.api.WaitIdle()
-    
-    return
+def shake_feeder(devices: Dict[str, Device], context: AppContext):
+    """Vibrate the Asyril platform and have it prepare a new part."""
+    with context.step("Shake feeder"):
+        _shake_feeder(devices, context)
 
 
 def get_manual_actions():
-    """Return project-specific manual actions exposed in the Manual tab."""
+    """Keys must match the ``key:`` entries under ``manual_actions:`` in config.yaml."""
     return {
         "scan": scan,
         "asyril_pick": asyril_pick,
+        "release_part": release_part,
+        "shake_feeder": shake_feeder,
     }
